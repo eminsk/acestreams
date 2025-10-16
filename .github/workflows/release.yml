@@ -5,6 +5,16 @@ on:
     tags:
       - 'v*.*.*'
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag name (e.g., v1.0.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -161,12 +171,31 @@ jobs:
           find artifacts -type f -exec cp {} release-files/ \;
           ls -lah release-files/
 
+      - name: Get tag name
+        id: get_tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "tag_name=${{ inputs.tag_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag_name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create or update tag (for manual dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f ${{ inputs.tag_name }} ${{ github.sha }}
+          git push -f origin ${{ inputs.tag_name }}
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.get_tag.outputs.tag_name }}
           files: release-files/*
           draft: false
-          prerelease: false
+          prerelease: ${{ inputs.prerelease || false }}
           generate_release_notes: true
           fail_on_unmatched_files: false
         env:
