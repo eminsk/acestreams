@@ -1,0 +1,115 @@
+﻿name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        include:
+          - os: windows-latest
+            output_name: MPV-Playlist-Player-Pro.exe
+            artifact_path: build/main.exe
+          - os: ubuntu-latest
+            output_name: MPV-Playlist-Player-Pro.bin
+            artifact_path: build/main.bin
+          - os: macos-latest
+            output_name: MPV-Playlist-Player-Pro.app
+            artifact_path: build/main.app
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies with uv
+        run: |
+          uv sync
+
+      - name: Build with Nuitka (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          uv run nuitka --onefile --windows-console-mode=disable --enable-plugin=tk-inter --output-filename=main.exe main.py
+
+      - name: Build with Nuitka (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          uv run nuitka --onefile --enable-plugin=tk-inter --output-filename=main.bin main.py
+
+      - name: Build with Nuitka (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          uv run nuitka --standalone --macos-create-app-bundle --enable-plugin=tk-inter --macos-app-name="MPV Playlist Player Pro" main.py
+
+      - name: Make binary executable (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          chmod +x ${{ matrix.artifact_path }} || true
+
+      - name: Rename artifact
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" == "macOS" ]; then
+            # For macOS, zip the .app bundle
+            cd build
+            zip -r ../${{ matrix.output_name }}.zip main.app
+            cd ..
+          else
+            # For Windows and Linux, just rename the binary
+            mv ${{ matrix.artifact_path }} ${{ matrix.output_name }}
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-build
+          path: |
+            ${{ matrix.output_name }}
+            ${{ matrix.output_name }}.zip
+          if-no-files-found: error
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display artifact structure
+        run: ls -R artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/**/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

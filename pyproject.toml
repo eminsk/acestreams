@@ -1,0 +1,12 @@
+[project]
+name = "acestream"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "acestream-search>=1.6.2",
+    "customtkinter>=5.2.2",
+    "nuitka>=2.8.1",
+    "ttkbootstrap>=1.14.7",
+]
