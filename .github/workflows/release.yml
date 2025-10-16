@@ -19,12 +19,15 @@ jobs:
           - os: windows-latest
             output_name: MPV-Playlist-Player-Pro.exe
             artifact_name: windows-build
+            binary_name: main.exe
           - os: ubuntu-latest
             output_name: MPV-Playlist-Player-Pro.bin
             artifact_name: linux-build
+            binary_name: main.bin
           - os: macos-latest
             output_name: MPV-Playlist-Player-Pro.app
             artifact_name: macos-build
+            binary_name: main.app
 
     steps:
       - name: Checkout repository
@@ -49,56 +52,73 @@ jobs:
         if: runner.os == 'Windows'
         timeout-minutes: 45
         run: |
-          uv run nuitka --onefile --windows-console-mode=disable --enable-plugin=tk-inter --include-package-data=customtkinter --include-package-data=ttkbootstrap --output-dir=build --output-filename=main.exe main.py
+          uv run nuitka --onefile --windows-console-mode=disable --enable-plugin=tk-inter --include-package-data=customtkinter --include-package-data=ttkbootstrap --output-filename=main.exe main.py
 
       - name: Build with Nuitka (Linux)
         if: runner.os == 'Linux'
         timeout-minutes: 45
         run: |
-          uv run nuitka --onefile --enable-plugin=tk-inter --include-package-data=customtkinter --include-package-data=ttkbootstrap --output-dir=build --output-filename=main.bin main.py
+          uv run nuitka --onefile --enable-plugin=tk-inter --include-package-data=customtkinter --include-package-data=ttkbootstrap --output-filename=main.bin main.py
 
       - name: Build with Nuitka (macOS)
         if: runner.os == 'macOS'
         timeout-minutes: 45
         run: |
-          uv run nuitka --standalone --macos-create-app-bundle --enable-plugin=tk-inter --include-package-data=customtkinter --include-package-data=ttkbootstrap --output-dir=build --macos-app-name="MPV Playlist Player Pro" main.py
+          uv run nuitka --standalone --macos-create-app-bundle --enable-plugin=tk-inter --include-package-data=customtkinter --include-package-data=ttkbootstrap --macos-app-name="MPV Playlist Player Pro" main.py
 
-      - name: List build directory contents
+      - name: List directory contents (Debug)
         shell: bash
         run: |
-          echo "=== Current directory ==="
+          echo "=== Root directory ==="
           ls -la
-          echo "=== Build directory ==="
+          echo ""
+          echo "=== Looking for build artifacts ==="
           if [ -d "build" ]; then
+            echo "build/ directory exists:"
             ls -laR build/
-          else
-            echo "Build directory does not exist"
+          fi
+          if [ -d "main.dist" ]; then
+            echo "main.dist/ directory exists:"
+            ls -laR main.dist/
           fi
 
-      - name: Locate and verify build artifact
+      - name: Locate and move build artifact
         shell: bash
         run: |
+          mkdir -p dist
+
           if [ "${{ runner.os }}" == "macOS" ]; then
-            if [ -d "build/main.app" ]; then
-              echo "✅ macOS app bundle found: build/main.app"
+            # macOS creates main.app in root or main.dist/
+            if [ -d "main.app" ]; then
+              echo "✅ Found main.app in root directory"
+              mv main.app dist/
+            elif [ -d "main.dist/main.app" ]; then
+              echo "✅ Found main.app in main.dist/"
+              mv main.dist/main.app dist/
             else
-              echo "❌ Build failed - build/main.app not found"
+              echo "❌ Build failed - main.app not found"
               exit 1
             fi
           elif [ "${{ runner.os }}" == "Windows" ]; then
-            if [ -f "build/main.exe" ]; then
-              echo "✅ Windows executable found: build/main.exe"
+            # Windows creates main.exe in root directory with --onefile
+            if [ -f "main.exe" ]; then
+              echo "✅ Found main.exe in root directory"
+              mv main.exe dist/
+            elif [ -f "build/main.exe" ]; then
+              echo "✅ Found main.exe in build/"
+              mv build/main.exe dist/
             else
-              echo "❌ Build failed - build/main.exe not found"
+              echo "❌ Build failed - main.exe not found"
               exit 1
             fi
           else
-            if [ -f "build/main.bin" ]; then
-              echo "✅ Linux binary found: build/main.bin"
-            elif [ -f "main.bin" ]; then
-              echo "⚠️ Linux binary found in root directory, moving to build/"
-              mkdir -p build
-              mv main.bin build/main.bin
+            # Linux creates main.bin in root directory with --onefile
+            if [ -f "main.bin" ]; then
+              echo "✅ Found main.bin in root directory"
+              mv main.bin dist/
+            elif [ -f "build/main.bin" ]; then
+              echo "✅ Found main.bin in build/"
+              mv build/main.bin dist/
             else
               echo "❌ Build failed - main.bin not found"
               exit 1
@@ -110,24 +130,24 @@ jobs:
         shell: bash
         run: |
           if [ "${{ runner.os }}" == "macOS" ]; then
-            chmod +x build/main.app/Contents/MacOS/* || true
+            chmod -R +x dist/main.app/Contents/MacOS/ || true
           else
-            chmod +x build/main.bin
+            chmod +x dist/main.bin
           fi
 
       - name: Package artifacts
         shell: bash
         run: |
-          mkdir -p dist
+          cd dist
           if [ "${{ runner.os }}" == "macOS" ]; then
-            cd build
-            zip -r ../dist/${{ matrix.output_name }}.zip main.app
-            cd ..
+            zip -r ${{ matrix.output_name }}.zip main.app
+            rm -rf main.app
           elif [ "${{ runner.os }}" == "Windows" ]; then
-            cp build/main.exe dist/${{ matrix.output_name }}
+            mv main.exe ${{ matrix.output_name }}
           else
-            cp build/main.bin dist/${{ matrix.output_name }}
+            mv main.bin ${{ matrix.output_name }}
           fi
+          cd ..
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
