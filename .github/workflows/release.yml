@@ -49,33 +49,65 @@ jobs:
         if: runner.os == 'Windows'
         timeout-minutes: 45
         run: |
-          uv run nuitka --onefile --windows-console-mode=disable --enable-plugin=tk-inter --include-package-data=customtkinter --include-package-data=ttkbootstrap --output-filename=main.exe main.py
+          uv run nuitka --onefile --windows-console-mode=disable --enable-plugin=tk-inter --include-package-data=customtkinter --include-package-data=ttkbootstrap --output-dir=build --output-filename=main.exe main.py
 
       - name: Build with Nuitka (Linux)
         if: runner.os == 'Linux'
         timeout-minutes: 45
         run: |
-          uv run nuitka --onefile --enable-plugin=tk-inter --include-package-data=customtkinter --include-package-data=ttkbootstrap --output-filename=main.bin main.py
+          uv run nuitka --onefile --enable-plugin=tk-inter --include-package-data=customtkinter --include-package-data=ttkbootstrap --output-dir=build --output-filename=main.bin main.py
 
       - name: Build with Nuitka (macOS)
         if: runner.os == 'macOS'
         timeout-minutes: 45
         run: |
-          uv run nuitka --standalone --macos-create-app-bundle --enable-plugin=tk-inter --include-package-data=customtkinter --include-package-data=ttkbootstrap --macos-app-name="MPV Playlist Player Pro" main.py
+          uv run nuitka --standalone --macos-create-app-bundle --enable-plugin=tk-inter --include-package-data=customtkinter --include-package-data=ttkbootstrap --output-dir=build --macos-app-name="MPV Playlist Player Pro" main.py
 
-      - name: Verify build artifact exists
+      - name: List build directory contents
+        shell: bash
+        run: |
+          echo "=== Current directory ==="
+          ls -la
+          echo "=== Build directory ==="
+          if [ -d "build" ]; then
+            ls -laR build/
+          else
+            echo "Build directory does not exist"
+          fi
+
+      - name: Locate and verify build artifact
         shell: bash
         run: |
           if [ "${{ runner.os }}" == "macOS" ]; then
-            ls -la build/main.app || (echo "Build failed - artifact not found" && exit 1)
+            if [ -d "build/main.app" ]; then
+              echo "✅ macOS app bundle found: build/main.app"
+            else
+              echo "❌ Build failed - build/main.app not found"
+              exit 1
+            fi
           elif [ "${{ runner.os }}" == "Windows" ]; then
-            ls -la build/main.exe || (echo "Build failed - artifact not found" && exit 1)
+            if [ -f "build/main.exe" ]; then
+              echo "✅ Windows executable found: build/main.exe"
+            else
+              echo "❌ Build failed - build/main.exe not found"
+              exit 1
+            fi
           else
-            ls -la build/main.bin || (echo "Build failed - artifact not found" && exit 1)
+            if [ -f "build/main.bin" ]; then
+              echo "✅ Linux binary found: build/main.bin"
+            elif [ -f "main.bin" ]; then
+              echo "⚠️ Linux binary found in root directory, moving to build/"
+              mkdir -p build
+              mv main.bin build/main.bin
+            else
+              echo "❌ Build failed - main.bin not found"
+              exit 1
+            fi
           fi
 
       - name: Make binary executable (Linux/macOS)
         if: runner.os != 'Windows'
+        shell: bash
         run: |
           if [ "${{ runner.os }}" == "macOS" ]; then
             chmod +x build/main.app/Contents/MacOS/* || true
