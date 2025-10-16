@@ -30,8 +30,8 @@ Professional high-performance M3U playlist player with MPV integration and moder
 
 ```bash
 # Clone the repository
-git clone <your-repo-url>
-cd <your-repo-name>
+git clone <https://github.com/eminsk/acestreams.git>
+cd <acestreams>
 
 # Install dependencies with uv
 uv sync
