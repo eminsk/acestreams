@@ -54,7 +54,6 @@ jobs:
       - name: Build with Nuitka (Windows)
         if: runner.os == 'Windows'
         timeout-minutes: 45
-        continue-on-error: false
         run: |
           echo "Starting Nuitka compilation for Windows..."
           uv run nuitka --onefile --windows-console-mode=disable --enable-plugin=tk-inter --nofollow-import-to=customtkinter,ttkbootstrap --assume-yes-for-downloads main.py
@@ -63,7 +62,6 @@ jobs:
       - name: Build with Nuitka (Linux)
         if: runner.os == 'Linux'
         timeout-minutes: 45
-        continue-on-error: false
         run: |
           echo "Starting Nuitka compilation for Linux..."
           uv run nuitka --onefile --enable-plugin=tk-inter --nofollow-import-to=customtkinter,ttkbootstrap --assume-yes-for-downloads main.py
@@ -72,123 +70,62 @@ jobs:
       - name: Build with Nuitka (macOS)
         if: runner.os == 'macOS'
         timeout-minutes: 45
-        continue-on-error: false
         run: |
           echo "Starting Nuitka compilation for macOS..."
           uv run nuitka --standalone --macos-create-app-bundle --enable-plugin=tk-inter --nofollow-import-to=customtkinter,ttkbootstrap --macos-app-name="MPV Playlist Player Pro" --assume-yes-for-downloads main.py
           echo "Nuitka compilation completed"
 
-      - name: Comprehensive directory listing (Debug)
+      - name: List directory contents (Debug)
         shell: bash
         run: |
-          echo "========================================"
-          echo "FULL DIRECTORY STRUCTURE AFTER BUILD"
-          echo "========================================"
+          echo "=== Root directory files ==="
+          ls -lah
           echo ""
-          echo "=== Root directory (first 50 files) ==="
-          ls -lah | head -50
-          echo ""
-          echo "=== Searching for .exe files ==="
-          find . -name "*.exe" -type f 2>/dev/null || echo "No .exe files found"
-          echo ""
-          echo "=== Searching for .bin files ==="
-          find . -name "*.bin" -type f 2>/dev/null || echo "No .bin files found"
-          echo ""
-          echo "=== Searching for .app directories ==="
-          find . -name "*.app" -type d 2>/dev/null || echo "No .app directories found"
-          echo ""
-          echo "=== build/ directory ==="
-          if [ -d "build" ]; then
-            ls -lahR build/ | head -100
-          else
-            echo "build/ directory does not exist"
-          fi
-          echo ""
-          echo "=== main.dist/ directory ==="
-          if [ -d "main.dist" ]; then
-            ls -lahR main.dist/ | head -100
-          else
-            echo "main.dist/ directory does not exist"
-          fi
-          echo ""
-          echo "=== main.build/ directory ==="
-          if [ -d "main.build" ]; then
-            ls -lah main.build/ | head -50
-          else
-            echo "main.build/ directory does not exist"
-          fi
+          echo "=== Looking for build artifacts ==="
+          find . -maxdepth 2 -name "*.exe" -o -name "*.bin" -o -name "*.app" 2>/dev/null || true
 
-      - name: Locate and move build artifact
+      - name: Collect and rename artifacts
         shell: bash
         run: |
           mkdir -p dist
-          FOUND=0
 
           if [ "${{ runner.os }}" == "macOS" ]; then
-            echo "Searching for macOS app bundle..."
-            SEARCH_PATHS=("main.app" "main.dist/main.app" "build/main.app" "main.build/main.app")
-            for path in "\${SEARCH_PATHS[@]}"; do
-              if [ -d "\$path" ]; then
-                echo "✅ Found main.app at: \$path"
-                cp -r "\$path" dist/
-                FOUND=1
-                break
-              fi
-            done
+            echo "Processing macOS app bundle..."
+            if [ -d "main.app" ]; then
+              echo "✅ Found main.app in root"
+              cp -r main.app dist/
+              cd dist && zip -r ${{ matrix.output_name }}.zip main.app && rm -rf main.app && cd ..
+            elif [ -d "main.dist/main.app" ]; then
+              echo "✅ Found main.app in main.dist/"
+              cp -r main.dist/main.app dist/
+              cd dist && zip -r ${{ matrix.output_name }}.zip main.app && rm -rf main.app && cd ..
+            else
+              echo "❌ main.app not found"
+              exit 1
+            fi
           elif [ "${{ runner.os }}" == "Windows" ]; then
-            echo "Searching for Windows executable..."
-            SEARCH_PATHS=("main.exe" "main.dist/main.exe" "build/main.exe" "main.build/main.exe")
-            for path in "\${SEARCH_PATHS[@]}"; do
-              if [ -f "\$path" ]; then
-                echo "✅ Found main.exe at: \$path"
-                cp "\$path" dist/
-                FOUND=1
-                break
-              fi
-            done
+            echo "Processing Windows executable..."
+            if [ -f "main.exe" ]; then
+              echo "✅ Found main.exe in root directory"
+              cp main.exe dist/${{ matrix.output_name }}
+            else
+              echo "❌ main.exe not found"
+              exit 1
+            fi
           else
-            echo "Searching for Linux binary..."
-            SEARCH_PATHS=("main.bin" "main.dist/main.bin" "build/main.bin" "main.build/main.bin")
-            for path in "\${SEARCH_PATHS[@]}"; do
-              if [ -f "\$path" ]; then
-                echo "✅ Found main.bin at: \$path"
-                cp "\$path" dist/
-                FOUND=1
-                break
-              fi
-            done
+            echo "Processing Linux binary..."
+            if [ -f "main.bin" ]; then
+              echo "✅ Found main.bin in root directory"
+              cp main.bin dist/${{ matrix.output_name }}
+              chmod +x dist/${{ matrix.output_name }}
+            else
+              echo "❌ main.bin not found"
+              exit 1
+            fi
           fi
 
-          if [ \$FOUND -eq 0 ]; then
-            echo "❌ Build artifact not found in any expected location"
-            echo "Please check the 'Comprehensive directory listing' step above"
-            exit 1
-          fi
-
-      - name: Make binary executable (Linux/macOS)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          if [ "${{ runner.os }}" == "macOS" ]; then
-            chmod -R +x dist/main.app/Contents/MacOS/ || true
-          else
-            chmod +x dist/main.bin || true
-          fi
-
-      - name: Package artifacts
-        shell: bash
-        run: |
-          cd dist
-          if [ "${{ runner.os }}" == "macOS" ]; then
-            zip -r ${{ matrix.output_name }}.zip main.app
-            rm -rf main.app
-          elif [ "${{ runner.os }}" == "Windows" ]; then
-            mv main.exe ${{ matrix.output_name }} || cp main.exe ${{ matrix.output_name }}
-          else
-            mv main.bin ${{ matrix.output_name }} || cp main.bin ${{ matrix.output_name }}
-          fi
-          cd ..
-          echo "Final dist/ contents:"
+          echo ""
+          echo "=== Final dist/ contents ==="
           ls -lah dist/
 
       - name: Upload artifact
