@@ -19,15 +19,12 @@ jobs:
           - os: windows-latest
             output_name: MPV-Playlist-Player-Pro.exe
             artifact_name: windows-build
-            binary_name: main.exe
           - os: ubuntu-latest
             output_name: MPV-Playlist-Player-Pro.bin
             artifact_name: linux-build
-            binary_name: main.bin
           - os: macos-latest
             output_name: MPV-Playlist-Player-Pro.app
             artifact_name: macos-build
-            binary_name: main.app
 
     steps:
       - name: Checkout repository
@@ -44,6 +41,12 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install system dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y patchelf ccache
+
       - name: Install dependencies with uv
         run: |
           uv sync
@@ -51,78 +54,115 @@ jobs:
       - name: Build with Nuitka (Windows)
         if: runner.os == 'Windows'
         timeout-minutes: 45
+        continue-on-error: false
         run: |
-          uv run nuitka --onefile --windows-console-mode=disable --enable-plugin=tk-inter --include-package-data=customtkinter --include-package-data=ttkbootstrap --output-filename=main.exe main.py
+          echo "Starting Nuitka compilation for Windows..."
+          uv run nuitka --onefile --windows-console-mode=disable --enable-plugin=tk-inter --nofollow-import-to=customtkinter,ttkbootstrap --assume-yes-for-downloads main.py
+          echo "Nuitka compilation completed"
 
       - name: Build with Nuitka (Linux)
         if: runner.os == 'Linux'
         timeout-minutes: 45
+        continue-on-error: false
         run: |
-          uv run nuitka --onefile --enable-plugin=tk-inter --include-package-data=customtkinter --include-package-data=ttkbootstrap --output-filename=main.bin main.py
+          echo "Starting Nuitka compilation for Linux..."
+          uv run nuitka --onefile --enable-plugin=tk-inter --nofollow-import-to=customtkinter,ttkbootstrap --assume-yes-for-downloads main.py
+          echo "Nuitka compilation completed"
 
       - name: Build with Nuitka (macOS)
         if: runner.os == 'macOS'
         timeout-minutes: 45
+        continue-on-error: false
         run: |
-          uv run nuitka --standalone --macos-create-app-bundle --enable-plugin=tk-inter --include-package-data=customtkinter --include-package-data=ttkbootstrap --macos-app-name="MPV Playlist Player Pro" main.py
+          echo "Starting Nuitka compilation for macOS..."
+          uv run nuitka --standalone --macos-create-app-bundle --enable-plugin=tk-inter --nofollow-import-to=customtkinter,ttkbootstrap --macos-app-name="MPV Playlist Player Pro" --assume-yes-for-downloads main.py
+          echo "Nuitka compilation completed"
 
-      - name: List directory contents (Debug)
+      - name: Comprehensive directory listing (Debug)
         shell: bash
         run: |
-          echo "=== Root directory ==="
-          ls -la
+          echo "========================================"
+          echo "FULL DIRECTORY STRUCTURE AFTER BUILD"
+          echo "========================================"
           echo ""
-          echo "=== Looking for build artifacts ==="
+          echo "=== Root directory (first 50 files) ==="
+          ls -lah | head -50
+          echo ""
+          echo "=== Searching for .exe files ==="
+          find . -name "*.exe" -type f 2>/dev/null || echo "No .exe files found"
+          echo ""
+          echo "=== Searching for .bin files ==="
+          find . -name "*.bin" -type f 2>/dev/null || echo "No .bin files found"
+          echo ""
+          echo "=== Searching for .app directories ==="
+          find . -name "*.app" -type d 2>/dev/null || echo "No .app directories found"
+          echo ""
+          echo "=== build/ directory ==="
           if [ -d "build" ]; then
-            echo "build/ directory exists:"
-            ls -laR build/
+            ls -lahR build/ | head -100
+          else
+            echo "build/ directory does not exist"
           fi
+          echo ""
+          echo "=== main.dist/ directory ==="
           if [ -d "main.dist" ]; then
-            echo "main.dist/ directory exists:"
-            ls -laR main.dist/
+            ls -lahR main.dist/ | head -100
+          else
+            echo "main.dist/ directory does not exist"
+          fi
+          echo ""
+          echo "=== main.build/ directory ==="
+          if [ -d "main.build" ]; then
+            ls -lah main.build/ | head -50
+          else
+            echo "main.build/ directory does not exist"
           fi
 
       - name: Locate and move build artifact
         shell: bash
         run: |
           mkdir -p dist
+          FOUND=0
 
           if [ "${{ runner.os }}" == "macOS" ]; then
-            # macOS creates main.app in root or main.dist/
-            if [ -d "main.app" ]; then
-              echo "✅ Found main.app in root directory"
-              mv main.app dist/
-            elif [ -d "main.dist/main.app" ]; then
-              echo "✅ Found main.app in main.dist/"
-              mv main.dist/main.app dist/
-            else
-              echo "❌ Build failed - main.app not found"
-              exit 1
-            fi
+            echo "Searching for macOS app bundle..."
+            SEARCH_PATHS=("main.app" "main.dist/main.app" "build/main.app" "main.build/main.app")
+            for path in "\${SEARCH_PATHS[@]}"; do
+              if [ -d "\$path" ]; then
+                echo "✅ Found main.app at: \$path"
+                cp -r "\$path" dist/
+                FOUND=1
+                break
+              fi
+            done
           elif [ "${{ runner.os }}" == "Windows" ]; then
-            # Windows creates main.exe in root directory with --onefile
-            if [ -f "main.exe" ]; then
-              echo "✅ Found main.exe in root directory"
-              mv main.exe dist/
-            elif [ -f "build/main.exe" ]; then
-              echo "✅ Found main.exe in build/"
-              mv build/main.exe dist/
-            else
-              echo "❌ Build failed - main.exe not found"
-              exit 1
-            fi
+            echo "Searching for Windows executable..."
+            SEARCH_PATHS=("main.exe" "main.dist/main.exe" "build/main.exe" "main.build/main.exe")
+            for path in "\${SEARCH_PATHS[@]}"; do
+              if [ -f "\$path" ]; then
+                echo "✅ Found main.exe at: \$path"
+                cp "\$path" dist/
+                FOUND=1
+                break
+              fi
+            done
           else
-            # Linux creates main.bin in root directory with --onefile
-            if [ -f "main.bin" ]; then
-              echo "✅ Found main.bin in root directory"
-              mv main.bin dist/
-            elif [ -f "build/main.bin" ]; then
-              echo "✅ Found main.bin in build/"
-              mv build/main.bin dist/
-            else
-              echo "❌ Build failed - main.bin not found"
-              exit 1
-            fi
+            echo "Searching for Linux binary..."
+            SEARCH_PATHS=("main.bin" "main.dist/main.bin" "build/main.bin" "main.build/main.bin")
+            for path in "\${SEARCH_PATHS[@]}"; do
+              if [ -f "\$path" ]; then
+                echo "✅ Found main.bin at: \$path"
+                cp "\$path" dist/
+                FOUND=1
+                break
+              fi
+            done
+          fi
+
+          if [ \$FOUND -eq 0 ]; then
+            echo "❌ Build artifact not found in any expected location"
+            echo "Please check the 'Comprehensive directory listing' step above"
+            exit 1
           fi
 
       - name: Make binary executable (Linux/macOS)
@@ -132,7 +172,7 @@ jobs:
           if [ "${{ runner.os }}" == "macOS" ]; then
             chmod -R +x dist/main.app/Contents/MacOS/ || true
           else
-            chmod +x dist/main.bin
+            chmod +x dist/main.bin || true
           fi
 
       - name: Package artifacts
@@ -143,11 +183,13 @@ jobs:
             zip -r ${{ matrix.output_name }}.zip main.app
             rm -rf main.app
           elif [ "${{ runner.os }}" == "Windows" ]; then
-            mv main.exe ${{ matrix.output_name }}
+            mv main.exe ${{ matrix.output_name }} || cp main.exe ${{ matrix.output_name }}
           else
-            mv main.bin ${{ matrix.output_name }}
+            mv main.bin ${{ matrix.output_name }} || cp main.bin ${{ matrix.output_name }}
           fi
           cd ..
+          echo "Final dist/ contents:"
+          ls -lah dist/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
